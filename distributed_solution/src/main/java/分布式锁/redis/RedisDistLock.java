@@ -1,12 +1,13 @@
-package 分布式锁.redis.basic;
+package 分布式锁.redis;
 
 import redis.clients.jedis.Jedis;
 import redis.clients.jedis.JedisPool;
 import redis.clients.jedis.params.SetParams;
 
+import java.util.Arrays;
 import java.util.Collections;
 import java.util.UUID;
-import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.DelayQueue;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.locks.Condition;
 import java.util.concurrent.locks.Lock;
@@ -25,6 +26,7 @@ public class RedisDistLock implements Lock {
     }
 
     private static final int LOCK_TIME = 2 * 1000;//锁的过期时间，防止死锁
+    private final static String LOCK_TIME_STR = String.valueOf(LOCK_TIME);
     private final static String RELEASE_LOCK_LUA =
             """
                     if redis.call('get',KEYS[1])==ARGV[1] then
@@ -100,6 +102,13 @@ public class RedisDistLock implements Lock {
                 if ("OK".equals(jedis.set(lockName, id, params))) {//如果redis返回OK，表示获取到锁
                     ownerThread = t;//设置当前持有锁的线程,用于判支持可重入
                     lockerId.set(id);//用于解锁
+                    if (watchDogTask == null) {//看门狗线程启动
+                        watchDogTask = new Thread(new WatchDog(), "expireThread");
+                        watchDogTask.setDaemon(true);
+                        watchDogTask.start();
+                    }
+                    //往延迟阻塞队列中加入元素（让看门口可以在过期之前一点点的时间去做锁的续期）
+                    delayedItems.add(new DelayedItem<>(new LockItem(lockName, id), LOCK_TIME));
                     return true;
                 } else {
                     return false;
@@ -132,26 +141,47 @@ public class RedisDistLock implements Lock {
     }
 
 
-    public static void main(String[] args) {
-        RedisDistLock lock = new RedisDistLock("lock");
-        CountDownLatch latch = new CountDownLatch(3);
-        for (int i = 0; i < 3; i++) {
-            new Thread(() -> {
+    //通过延迟队列避免无畏的轮询
+    private static final DelayQueue<DelayedItem<LockItem>> delayedItems = new DelayQueue<>();
+    private static final String DELAY_LOCK_LUA = """
+                if redis.call('get',KEYS[1]) == ARGV[1]
+                   then return redis.call('pexpire',KEYS[1],ARGV[2])
+                   else return 0 end
+            """;
+
+    /*看门狗线程*/
+    private Thread watchDogTask;
+
+    /**
+     * Created by penghs at 2023/12/21 16:44
+     */
+    public static class WatchDog implements Runnable {
+
+        @Override
+        public void run() {
+            System.out.println("看门狗线程已启动----");
+            while (!Thread.currentThread().isInterrupted()) {
                 try {
-                    lock.lock();
-                    Thread.sleep(3000);
+                    LockItem lockItem = delayedItems.take().getItem();
+                    Jedis jedis = null;
+                    try {
+                        jedis = jedisPool.getResource();
+                        Long result = (Long) jedis.eval(DELAY_LOCK_LUA, Collections.singletonList(lockItem.getKey()), Arrays.asList(lockItem.getValue(), LOCK_TIME_STR));
+                        if (result == 0L) {
+                            System.out.println("Redis上的锁已释放，无需续期");
+                        } else {
+                            System.out.println("Redis上的锁已续期，继续加入队列");
+                            delayedItems.add(new DelayedItem<>(new LockItem(lockItem.getKey(), lockItem.getValue()), LOCK_TIME));
+                        }
+                    } finally {
+                        if (jedis != null)
+                            jedis.close();
+                    }
+
                 } catch (InterruptedException e) {
-                    e.printStackTrace();
-                } finally {
-                    lock.unlock();
-                    latch.countDown();
+                    throw new RuntimeException("看门狗线程被中断", e);
                 }
-            }).start();
-        }
-        try {
-            latch.await();
-        } catch (InterruptedException e) {
-            e.printStackTrace();
+            }
         }
     }
 }
