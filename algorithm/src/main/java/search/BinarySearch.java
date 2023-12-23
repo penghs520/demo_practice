@@ -21,7 +21,8 @@ public class BinarySearch {
         }
         int left = 0;
         int right = arr.length - 1;
-        int mid = left + (right - left) / 2;
+        //int mid =  (right + left) / 2; 这么写，如果right和left都是很大的数，那么就会溢出
+        int mid = left + (right - left) / 2;//这么写就不会溢出
         while (true) {
             if (arr[mid] < arr[mid - 1] && arr[mid] < arr[mid + 1]) {
                 return mid;
