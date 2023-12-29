@@ -1,4 +1,4 @@
-package heap;
+package my.algorithm.heap;
 
 /**
  * Created by penghs at 2023/12/25 13:40

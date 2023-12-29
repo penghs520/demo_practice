@@ -1,10 +1,4 @@
-package sort;
-
-import java.util.Arrays;
-import java.util.Collections;
-import java.util.List;
-import java.util.stream.Collectors;
-import java.util.stream.Stream;
+package my.algorithm.sort;
 
 /**
  * Created by penghs at 2023/12/23 9:27

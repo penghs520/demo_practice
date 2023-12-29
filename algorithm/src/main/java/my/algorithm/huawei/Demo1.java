@@ -1,4 +1,4 @@
-package huawei;
+package my.algorithm.huawei;
 
 import java.util.Arrays;
 import java.util.Random;

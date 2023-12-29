@@ -1,4 +1,4 @@
-package sort;
+package my.algorithm.sort;
 
 /**
  * Created by penghs at 2023/12/23 9:37

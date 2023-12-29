@@ -1,4 +1,4 @@
-package search;
+package my.algorithm.search;
 
 /**
  * Created by penghs at 2023/12/23 9:59
